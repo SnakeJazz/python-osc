@@ -5,9 +5,21 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+No changes so far
+
+## [1.7.7]
+
+###  Fixed
+
+Flaky NTP test
+
+## [1.7.6]
+
 ### Added
 
-Support for python 3.7 and 3.8
+-  Support for python 3.7 and 3.8.
+
+-  Releasing wheel on top of source package.
 
 ## [1.7.4]
 
