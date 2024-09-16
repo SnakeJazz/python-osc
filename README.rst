@@ -2,25 +2,28 @@
 python-osc
 ==========
 
-Open Sound Control server and client implementations in **pure python** (3.5+).
+Open Sound Control server and client implementations in **pure python**.
 
-.. image:: https://travis-ci.org/attwad/python-osc.svg?branch=master
-    :target: https://travis-ci.org/attwad/python-osc
+.. image:: https://github.com/attwad/python-osc/actions/workflows/python-test.yml/badge.svg
+    :target: https://github.com/attwad/python-osc/actions/workflows/python-test.yml
+
 
 Current status
 ==============
 
-This library was developped following the specifications at
-http://opensoundcontrol.org/spec-1_0
+This library was developed following the
+`OpenSoundControl Specification 1.0 <https://opensoundcontrol.stanford.edu/spec-1_0.html>`_
 and is currently in a stable state.
 
 Features
 ========
 
-* UDP blocking/threading/forking/asyncio server implementations
-* UDP client
-* int, float, string, double, MIDI, timestamps, blob OSC arguments
+* UDP and TCP blocking/threading/forking/asyncio server implementations
+* UDP and TCP clients, including asyncio support
+* TCP support for 1.0 and 1.1 protocol formats
+* int, int64, float, string, double, MIDI, timestamps, blob, nil OSC arguments
 * simple OSC address<->callback matching system
+* support for sending responses from callback handlers in client and server
 * extensive unit test coverage
 * basic client and server examples
 
@@ -41,13 +44,6 @@ to install it just use pip (prefered):
 .. code-block:: bash
 
     $ pip install python-osc
-
-or from the raw sources for the development version:
-
-.. code-block:: bash
-
-    $ python setup.py test
-    $ python setup.py install
 
 Examples
 ========
@@ -96,7 +92,7 @@ Simple server
   import argparse
   import math
 
-  from pythonosc import dispatcher
+  from pythonosc.dispatcher import Dispatcher
   from pythonosc import osc_server
 
   def print_volume_handler(unused_addr, args, volume):
@@ -115,7 +111,7 @@ Simple server
         type=int, default=5005, help="The port to listen on")
     args = parser.parse_args()
 
-    dispatcher = dispatcher.Dispatcher()
+    dispatcher = Dispatcher()
     dispatcher.map("/filter", print)
     dispatcher.map("/volume", print_volume_handler, "Volume")
     dispatcher.map("/logvolume", print_compute_handler, "Log volume", math.log)

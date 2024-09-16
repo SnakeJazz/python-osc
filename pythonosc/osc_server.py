@@ -4,19 +4,23 @@
 import asyncio
 import os
 import socketserver
+from socket import socket as _socket
+from typing import Any, Coroutine, Tuple, Union, cast
 
-from pythonosc import osc_bundle
-from pythonosc import osc_message
+from pythonosc import osc_bundle, osc_message
 from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_message_builder import build_msg
 
-from asyncio import BaseEventLoop
-
-from typing import List, Tuple
-from types import coroutine
+_RequestType = Union[_socket, Tuple[bytes, _socket]]
+_AddressType = Union[Tuple[str, int], str]
 
 
 class _UDPHandler(socketserver.BaseRequestHandler):
     """Handles correct UDP messages for all types of server."""
+
+    def __init__(self, request, client_address, server):
+        self.socket = request[1]
+        super().__init__(request, client_address, server)
 
     def handle(self) -> None:
         """Calls the handlers via dispatcher
@@ -26,35 +30,54 @@ class _UDPHandler(socketserver.BaseRequestHandler):
         If not the server won't call it and so no new
         threads/processes will be spawned.
         """
-        self.server.dispatcher.call_handlers_for_packet(self.request[0], self.client_address)
+        server = cast(OSCUDPServer, self.server)
+        resp = server.dispatcher.call_handlers_for_packet(
+            self.request[0], self.client_address
+        )
+        for r in resp:
+            if not isinstance(r, tuple):
+                r = [r]
+            msg = build_msg(r[0], r[1:])
+            self.socket.sendto(msg.dgram, self.client_address)
 
 
-def _is_valid_request(request: List[bytes]) -> bool:
+def _is_valid_request(request: _RequestType) -> bool:
     """Returns true if the request's data looks like an osc bundle or message.
 
     Returns:
         True if request is OSC bundle or OSC message
     """
+    assert isinstance(
+        request, tuple
+    )  # TODO: handle requests which are passed just as a socket?
     data = request[0]
-    return (
-            osc_bundle.OscBundle.dgram_is_bundle(data)
-            or osc_message.OscMessage.dgram_is_message(data))
+    return osc_bundle.OscBundle.dgram_is_bundle(
+        data
+    ) or osc_message.OscMessage.dgram_is_message(data)
 
 
 class OSCUDPServer(socketserver.UDPServer):
     """Superclass for different flavors of OSC UDP servers"""
 
-    def __init__(self, server_address: Tuple[str, int], dispatcher: Dispatcher) -> None:
+    def __init__(
+        self,
+        server_address: Tuple[str, int],
+        dispatcher: Dispatcher,
+        bind_and_activate: bool = True,
+    ) -> None:
         """Initialize
 
         Args:
             server_address: IP and port of server
             dispatcher: Dispatcher this server will use
+            (optional) bind_and_activate: default=True defines if the server has to start on call of constructor
         """
-        super().__init__(server_address, _UDPHandler)
+        super().__init__(server_address, _UDPHandler, bind_and_activate)
         self._dispatcher = dispatcher
 
-    def verify_request(self, request: List[bytes], client_address: Tuple[str, int]) -> bool:
+    def verify_request(
+        self, request: _RequestType, client_address: _AddressType
+    ) -> bool:
         """Returns true if the data looks like a valid OSC UDP datagram
 
         Args:
@@ -89,6 +112,7 @@ class ThreadingOSCUDPServer(socketserver.ThreadingMixIn, OSCUDPServer):
 
 
 if hasattr(os, "fork"):
+
     class ForkingOSCUDPServer(socketserver.ForkingMixIn, OSCUDPServer):
         """Forking version of the OSC UDP server.
 
@@ -98,13 +122,18 @@ if hasattr(os, "fork"):
         """
 
 
-class AsyncIOOSCUDPServer():
+class AsyncIOOSCUDPServer:
     """Asynchronous OSC Server
 
     An asynchronous OSC Server using UDP. It creates a datagram endpoint that runs in an event loop.
     """
 
-    def __init__(self, server_address: Tuple[str, int], dispatcher: Dispatcher, loop: BaseEventLoop) -> None:
+    def __init__(
+        self,
+        server_address: Tuple[str, int],
+        dispatcher: Dispatcher,
+        loop: asyncio.BaseEventLoop,
+    ) -> None:
         """Initialize
 
         Args:
@@ -124,8 +153,18 @@ class AsyncIOOSCUDPServer():
         def __init__(self, dispatcher: Dispatcher) -> None:
             self.dispatcher = dispatcher
 
-        def datagram_received(self, data: bytes, client_address: Tuple[str, int]) -> None:
-            self.dispatcher.call_handlers_for_packet(data, client_address)
+        def connection_made(self, transport):
+            self.transport = transport
+
+        def datagram_received(
+            self, data: bytes, client_address: Tuple[str, int]
+        ) -> None:
+            resp = self.dispatcher.call_handlers_for_packet(data, client_address)
+            for r in resp:
+                if not isinstance(r, tuple):
+                    r = [r]
+                msg = build_msg(r[0], r[1:])
+                self.transport.sendto(msg.dgram, client_address)
 
     def serve(self) -> None:
         """Creates a datagram endpoint and registers it with event loop.
@@ -135,7 +174,11 @@ class AsyncIOOSCUDPServer():
         """
         self._loop.run_until_complete(self.create_serve_endpoint())
 
-    def create_serve_endpoint(self) -> coroutine:
+    def create_serve_endpoint(
+        self,
+    ) -> Coroutine[
+        Any, Any, Tuple[asyncio.transports.BaseTransport, asyncio.DatagramProtocol]
+    ]:
         """Creates a datagram endpoint and registers it with event loop as coroutine.
 
         Returns:
@@ -143,7 +186,8 @@ class AsyncIOOSCUDPServer():
         """
         return self._loop.create_datagram_endpoint(
             lambda: self._OSCProtocolFactory(self.dispatcher),
-            local_addr=self._server_address)
+            local_addr=self._server_address,
+        )
 
     @property
     def dispatcher(self) -> Dispatcher:
